@@ -3,8 +3,8 @@ from scipy.io import arff
 import pandas as pd
 from os import listdir
 from matplotlib import pyplot as plt
-from clustering import Chameleon
-
+# from clustering import Chameleon
+# 
 def load_data(path):
     data = arff.loadarff(path)
     df = pd.DataFrame(data[0])
@@ -24,12 +24,13 @@ def plot_data(df, title=None):
 
 c = 0
 for file in reversed(listdir('data/artificial')):
-    print(file)
+    file = 'spiral.arff'
     df = load_data(f'data/artificial/{file}')
     plot_data(df, title=file)
     c += 1
-    a = Chameleon(df, min_size=0.05, k_neighbors=4)
-    a.init_function_product_scheme(0.5)
+
+    # a = Chameleon(df, min_size=0.05, k_neighbors=4)
+    # a.init_function_product_scheme(0.5)
     if c == 1:
         break
 

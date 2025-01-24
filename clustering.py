@@ -1,6 +1,7 @@
 from sklearn.neighbors import NearestNeighbors 
 import networkx as nx
-import pymetis as metis
+# import pymetis as metis
+
 
 class Chameleon:
     def __init__(self, dataset, min_size = 0.05, k_neighbors=2):
@@ -16,34 +17,52 @@ class Chameleon:
         self.k_neighbors = k_neighbors
         self.min_cluster_size = int(min_size * len(self.dataset))
 
-        self.graph = None
-        self.clusters = None
-        self.scheme = None
-        self.alpha = None
-        self.min_rc = None
-        self.mic_ri = None
+        self.scheme = None  # Clustering scheme
+        self.alpha = None   # Balance factor for product scheme
+        self.min_rc = None  # Minimum relative closeness
+        self.mic_ri = None  # Minimum relative interconnectivity
 
-    def init_function_product_scheme(self, alpha):
-        """
-        Initialize the function product scheme parameter.
+        # Attributes for intermediate results
+        self.graph = None         # k-NN graph
+        self.clusters = None      # Initial partitions (Phase 1)
+        self.final_clusters = []  # Final clusters after merging (Phase 2)
 
-        Parameters:
-        - alpha (float): The balance factor between relative closeness and relative interconnectivity.
+    def set_scheme(self, scheme, **kwargs):
         """
-        self.scheme = 'function_product'
-        self.alpha = alpha
-
-    def init_values_limits_scheme(self, rc, ri):
-        """
-        Initialize the values limit scheme parameters.
+        Set the merging scheme and its parameters.
 
         Parameters:
-        - rc (float): Minimum relative closeness for merging clusters.
-        - ri (float): Minimum relative interconnectivity for merging clusters.
+        - scheme (str): The merging scheme. Options are 'function_product' or 'values_limits'.
+        - kwargs: Additional parameters for the scheme:
+            * If 'function_product': Requires 'alpha' (float).
+            * If 'values_limits': Requires 'rc' (float) and 'ri' (float).
         """
-        self.scheme = 'values_limits'
-        self.rc = rc
-        self.ri = ri
+
+        if scheme not in ['function_product', 'values_limits']:
+            raise ValueError("Invalid scheme. Choose either 'function_product' or 'values_limits'.")
+        
+        self.scheme = scheme
+
+        if scheme == "function_product":
+            if 'alpha' not in kwargs:
+                raise ValueError("You must provide the 'alpha' parameter for the function product scheme.")
+            self.alpha = kwargs['alpha']
+
+        elif scheme == "values_limits":
+            if 'rc' not in kwargs or 'ri' not in kwargs:
+                raise ValueError("You must provide the 'rc' and 'ri' parameters for the values limits scheme.")
+            self.rc = kwargs['rc']
+            self.ri = kwargs['ri']
+
+    def __calculate_relative_metric(self, cluster1, cluster2):
+        """
+        Calculate the relative closeness and relative interconnectivity between two clusters.
+
+        Parameters:
+        - cluster1 (set): The first cluster.
+        - cluster2 (set): The second cluster.
+        """
+        pass
 
     def _build_knn_graph(self):
         """
@@ -56,23 +75,30 @@ class Chameleon:
         # Create a graph with nodes and edges based on k-nearest neighbors
         graph = nx.Graph()
         for i, neighbors in enumerate(indices):
-            for j, neighbor in enumerate(neighbors):
-                if i != neighbor: 
-                    graph.add_edge(i, neighbor, weight=1 / distances[i, j])
+            for j, weight in zip(neighbors, distances[i]):
+                if i != j: # Avoid self-loops
+                    graph.add_edge(i, j, weight=1 / distances[i, j])
 
         return graph
     
-    def _bisect_graph(self, subgraph):
+    def _partition_graph(self):
         """
-        Bisect the graph into two parts such that the edge cut is minimized.
+        Partition the graph into two parts.
         """
-        if len(subgraph.nodes) < 2:
-            return [set(subgraph.nodes)]
+        subgraph = self._bisect_graph(self.graph)
+        print(subgraph)
+    
+    # def _bisect_graph(self, subgraph):
+    #     """
+    #     Bisect the graph into two parts such that the edge cut is minimized.
+    #     """
+    #     if len(subgraph.nodes) < 2:
+    #         return [set(subgraph.nodes)]
         
-        # Partition the graph using hMETIS
-        (edgecuts, parts) = metis.part_graph(subgraph, 2)
+    #     # Partition the graph using hMETIS
+    #     (edgecuts, parts) = metis.part_graph(subgraph, 2)
 
-        print(parts)
+    #     print(parts)
 
     
     def _initial_partitioning(self):
@@ -83,11 +109,6 @@ class Chameleon:
         Returns:
         - initial_subclusters (list): The initial subclusters.
         """
-
-        
-
-
-        
 
     def _merge_clusters(self):
         """
@@ -103,9 +124,11 @@ class Chameleon:
         if self.scheme is None:
             raise ValueError('You must initialize the scheme before fitting the model.')
         
-        # Step 1: Construct the k-nearest neighbor graph
-        self.graph = self._build_knn_graph()
-        # Step 2: Initial partitioning into small clusters
-        initial_subclusters = self._initial_partitioning()
-        # Step 3: Merge clusters dynamically
-        self._merge_clusters(initial_subclusters)
+        # Phase 1: Construct the k-NN graph and partition the it
+        self._build_knn_graph()
+        self._partition_graph()
+
+        # Phase 2: Merge clusters dynamically
+        self._merge_clusters()
+
+        return self.final_clusters
