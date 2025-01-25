@@ -1,6 +1,6 @@
 from sklearn.neighbors import NearestNeighbors 
 import networkx as nx
-# import pymetis as metis
+import pymetis as metis
 
 
 class Chameleon:
@@ -88,17 +88,17 @@ class Chameleon:
         subgraph = self._bisect_graph(self.graph)
         print(subgraph)
     
-    # def _bisect_graph(self, subgraph):
-    #     """
-    #     Bisect the graph into two parts such that the edge cut is minimized.
-    #     """
-    #     if len(subgraph.nodes) < 2:
-    #         return [set(subgraph.nodes)]
+    def _bisect_graph(self, subgraph):
+        """
+        Bisect the graph into two parts such that the edge cut is minimized.
+        """
+        if len(subgraph.nodes) < 2:
+            return [set(subgraph.nodes)]
         
-    #     # Partition the graph using hMETIS
-    #     (edgecuts, parts) = metis.part_graph(subgraph, 2)
+        # Partition the graph using hMETIS
+        (edgecuts, parts) = metis.part_graph(subgraph, 2)
 
-    #     print(parts)
+        print(parts)
 
     
     def _initial_partitioning(self):
