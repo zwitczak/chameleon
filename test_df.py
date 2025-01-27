@@ -1,59 +1,45 @@
-from scipy.io import arff
-import pandas as pd
-from os import listdir
-from matplotlib import pyplot as plt
-import matplotlib as mlp
+import os
 from chameleon import Chameleon
-import numpy as np
-from pylab import *
+from helpers.filehandler import FileHandler
+from helpers.plothandler import ClusterPlotHandler
 
-def load_data(path):
-    data = arff.loadarff(path)
-    df = pd.DataFrame(data[0])
-    return df
-
-def transform_graphs_to_dataframe(graphs, df):
-    data = []
-    for cluster_idx, G in enumerate(graphs):
-        for node in G.nodes:
-            pos_x, pos_y = df.loc[node, ['a0', 'a1']]
-            data.append((node, cluster_idx, pos_x, pos_y))
-    
-    transformed_df = pd.DataFrame(data, columns=['node_idx', 'cluster_idx', 'pos_x', 'pos_y'])
-    return transformed_df
-
-
-def plot_clusters(df, filename='clusters.png'):
-    # Create a scatter plot
-    plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(df['pos_x'], df['pos_y'], c=df['cluster_idx'], cmap='viridis', s=50, alpha=0.7)
-    
-    # Add a color bar
-    plt.colorbar(scatter, label='Cluster Index')
-    
-    # Add labels and title
-    plt.xlabel('pos_x')
-    plt.ylabel('pos_y')
-    plt.title('Clusters Visualization')
-    
-    # Save plot to file
-    plt.savefig(filename)
-    plt.close()
 if __name__ == '__main__':
+    DATA_DIR = 'data/artificial'
+    OUTPUT_DIR = 'results'
 
-    c = 0
-    for file in reversed(listdir('data/artificial')):
-        file = 'spiral.arff'  # You are overwriting this line, making the loop unnecessary
-        df = load_data(f'data/artificial/{file}')
-        break
+    # ensure data directory exists
+    if not os.path.exists(DATA_DIR):
+        raise FileNotFoundError(f"Directory {DATA_DIR} not found.")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    chameleon = Chameleon(dataset=df, min_cluster_size=0.005, k_neighbors=2, alpha=0.5)
-    clusters = chameleon.fit(verbose=True)
-    n = len(clusters)
+    # initialize chameleon algorithm
+    chameleon = Chameleon(min_cluster_size=0.015, k_neighbors=15, alpha=1.5)
+    for alfa in [1.5, 2.0, 2.5]:
+        for k in [5, 10, 15]:
+            chameleon = Chameleon(min_cluster_size=0.015, k_neighbors=k, alpha=alfa)
+            for c, file in enumerate(os.listdir(DATA_DIR)):
+                df, class_flag = FileHandler.load_arff_data(os.path.join(DATA_DIR, file))
+                if df is None:
+                    continue
+                
+                # exclude class column from dataset
+                if class_flag:
+                    dataset = df.iloc[:, :-1]
 
-    transformed_df = transform_graphs_to_dataframe(clusters, df)
-    print(transformed_df)
-    plot_clusters(transformed_df)
-    # print(f"Number of final clusters: {n}")
+                final_clusters = chameleon.fit(dataset=dataset, verbose=False)
+                part_clusters = chameleon.clusters
 
-    # data = transform_graphs_to_data(chameleon.final_clusters, clusters)
+
+                final_clusters_df = FileHandler.transform_graph_to_df(final_clusters, df)
+                partial_clusters_df = FileHandler.transform_graph_to_df(part_clusters, df)
+                
+                clusters_dict = {
+                    'final_clusters': final_clusters_df,
+                    'partial_clusters': partial_clusters_df,
+                    'correct_clusters': df
+                }
+
+                ClusterPlotHandler.draw_2d_many_clusters(output_dir=os.path.join(OUTPUT_DIR, f"{file}_comparison_k{k}_a{alfa}.png"), **clusters_dict)
+
+                # if c == 20:
+                #     break

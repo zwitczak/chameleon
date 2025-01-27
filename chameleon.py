@@ -1,11 +1,14 @@
 from sklearn.neighbors import NearestNeighbors
 import networkx as nx
 from tqdm import tqdm
-from graphtools import recursive_partition, merge_score
+from helpers.graphtools import recursive_partition
 import math
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
+from helpers.clustertools import merge_score
 
 class Chameleon:
-    def __init__(self, dataset, min_cluster_size=0.05, k_neighbors=2, alpha=0.5):
+    def __init__(self, min_cluster_size=0.05, k_neighbors=2, alpha=0.5):
         """
         Initialize the Chameleon clustering algorithm.
 
@@ -14,7 +17,6 @@ class Chameleon:
         - k_neighbors (int): The number of neighbors to consider when constructing the k-NN graph.
         - min_size (float): Minimum cluster size as a fraction of the dataset size.
         """
-        self.dataset = dataset
         self.k_neighbors = k_neighbors
         self.min_cluster_size = min_cluster_size
 
@@ -37,7 +39,7 @@ class Chameleon:
         
         if verbose:
             print(f"Building k-NN graph (k = {self.k_neighbors})...")
-            
+
         # Create a graph with nodes and edges based on k-nearest neighbors
         graph = nx.Graph()
         iterpoints = tqdm(enumerate(indices), total=len(self.dataset)) if verbose else enumerate(indices)
@@ -66,53 +68,62 @@ class Chameleon:
             print(f"Partitioning complete. Number of clusters: {len(self.clusters)}")
         
     def _merge_clusters(self, verbose=False):
-        """
-        Merge clusters based on the product function scheme.
-        """
-        # Convert clusters into NetworkX subgraphs for calculation
+        merges = 0
         cluster_graphs = [self.graph.subgraph(cluster.nodes).copy() for cluster in self.clusters]
 
-        with tqdm(total=len(cluster_graphs) * (len(cluster_graphs) - 1) // 2, desc="Merging Clusters", disable=not verbose) as pbar:
-            while True:
-                best_merge_score = float('-inf')
-                best_pair = None
+        pbar = tqdm(desc="Merging Clusters. Operations", disable=not verbose)
+        pbar2 = tqdm(desc="Number of merges", disable=not verbose)
 
-                # Evaluate all possible pairs of clusters
-                for i in range(len(cluster_graphs)):
-                    for j in range(i + 1, len(cluster_graphs)):
-                        score = merge_score(self.graph, cluster_graphs[i], cluster_graphs[j], self.alpha)
-                        # if verbose:
-                        #     print(f"Evaluating merge score for clusters {i} and {j}: {score}")
-                        if score > best_merge_score:
-                            best_merge_score = score
-                            best_pair = (i, j)
-                        pbar.update(1)
+        while True:
+            best_merge_score = float('-inf')
+            best_pair = None
 
-                if best_pair is None or best_merge_score <= 0:
-                    if verbose:
-                        print("No valid merges found or merge score <= 0. Stopping merging.")
-                    # No valid merge found, stop merging
-                    break
+            def compute_merge_score(i, j):
+                score = merge_score(self.graph, cluster_graphs[i], cluster_graphs[j], self.alpha)
+                return (i, j, score)
 
+            pairs = [(i, j) for i in range(len(cluster_graphs)) for j in range(i + 1, len(cluster_graphs))]
+            scores = []
+            pbar2.update(1)
 
-                # Merge the best pair of clusters
-                i, j = best_pair
+            with ThreadPoolExecutor() as executor:
+                for i, j, score in executor.map(lambda pair: compute_merge_score(*pair), pairs):
+                    scores.append((i, j, score))
+                    pbar.update(1)
+
+            for i, j, score in scores:
+                if score > best_merge_score:
+                    best_merge_score = score
+                    best_pair = (i, j)
+
+            if verbose:
+                print(f"Best merge score: {best_merge_score}. Best pair: {best_pair}")
+            if best_pair is None or best_merge_score <= 0:
                 if verbose:
-                    print(f"Merging clusters {i} and {j} with score {best_merge_score}")
-                new_cluster_nodes = set(cluster_graphs[i].nodes).union(cluster_graphs[j].nodes)
-                new_cluster = self.graph.subgraph(new_cluster_nodes).copy()
+                    print("No valid merges found or merge score <= 0. Stopping merging.")
+                break
 
-                # Update cluster list
-                cluster_graphs.pop(j)  # Remove the higher index first to avoid reordering issues
-                cluster_graphs.pop(i)
-                cluster_graphs.append(new_cluster)
+            # Merge the best pair
+            i, j = best_pair
+            new_cluster_nodes = set(cluster_graphs[i].nodes).union(cluster_graphs[j].nodes)
+            new_cluster = self.graph.subgraph(new_cluster_nodes).copy()
 
+            cluster_graphs.pop(j)
+            cluster_graphs.pop(i)
+            cluster_graphs.append(new_cluster)
+            merges += 1
+
+        pbar.close()
+        pbar2.close()
+        if verbose:
+            print(f"Finished merging. Number of merges: {merges}")
         self.final_clusters = cluster_graphs
         
-    def fit(self, verbose=False):
+    def fit(self, dataset, verbose=False):
         """
         Fit the Chameleon algorithm.
         """
+        self.dataset = dataset
 
         if self.scheme is None:
             raise ValueError('You must initialize the scheme before fitting the model.')
@@ -124,4 +135,23 @@ class Chameleon:
         # Phase 2: Merge clusters dynamically
         self._merge_clusters(verbose=verbose)
 
+        # return self.final_clusters
         return self.final_clusters
+    
+
+    def format_clusters_to_df(self):
+        """
+        Format the clusters into a dataframe.
+        """
+        if self.final_clusters is None or self.dataset is None:
+            raise ValueError('You must fit the model before formatting the clusters.')
+        
+        data = []
+        for cluster_idx, G in enumerate(self.final_clusters):
+            for node in G.nodes:
+                pos_x, pos_y = self.dataset.loc[node, ['x', 'y']]
+                data.append((node, cluster_idx, pos_x, pos_y))
+    
+        transformed_df = pd.DataFrame(data, columns=['node_idx', 'cluster_idx', 'pos_x', 'pos_y'])
+        return transformed_df
+        
